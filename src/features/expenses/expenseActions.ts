@@ -25,10 +25,29 @@ export interface CreateExpenseInput {
 }
 
 export async function createExpense(input: CreateExpenseInput): Promise<Expense> {
+  const totalAmount = Math.round(Number(input.totalAmount) || 0);
+  const subtotal = Math.round(Number(input.subtotal) || 0);
+  const tipAmount = Math.round(Number(input.tipAmount) || 0);
+
+  const normalizedPayers = input.payers
+    .map((p) => ({
+      memberId: p.memberId,
+      amount: Math.round(Number(p.amount) || 0),
+    }))
+    .filter((p) => p.amount > 0);
+
+  const normalizedShares = input.shares
+    .map((s) => ({
+      memberId: s.memberId,
+      weight: Number(s.weight) || 1,
+      amount: Math.round(Number(s.amount) || 0),
+    }))
+    .filter((s) => s.amount > 0);
+
   // Validate before writing
-  const payersSum = input.payers.reduce((s, p) => s + p.amount, 0);
-  const sharesSum = input.shares.reduce((s, sh) => s + sh.amount, 0);
-  const validation = validateExpense(input.totalAmount, payersSum, sharesSum);
+  const payersSum = normalizedPayers.reduce((s, p) => s + p.amount, 0);
+  const sharesSum = normalizedShares.reduce((s, sh) => s + sh.amount, 0);
+  const validation = validateExpense(totalAmount, payersSum, sharesSum);
   if (!validation.valid) {
     throw new Error(validation.error);
   }
@@ -36,36 +55,38 @@ export async function createExpense(input: CreateExpenseInput): Promise<Expense>
   const now = Date.now();
 
   return database.write(async () => {
-    const expense = await database.get<Expense>('expenses').create((e) => {
+    const expense = database.get<Expense>('expenses').prepareCreate((e) => {
       e._raw.id = generateId();
       e.groupId = input.groupId;
       e.title = input.title;
-      e.subtotal = input.subtotal;
-      e.tipAmount = input.tipAmount;
-      e.totalAmount = input.totalAmount;
+      e.subtotal = subtotal;
+      e.tipAmount = tipAmount;
+      e.totalAmount = totalAmount;
       e.category = input.category;
       raw(e).created_at = now;
       raw(e).updated_at = now;
     });
 
-    for (const p of input.payers) {
-      await database.get<Payer>('payers').create((payer) => {
+    const payerRecords = normalizedPayers.map((p) =>
+      database.get<Payer>('payers').prepareCreate((payer) => {
         payer._raw.id = generateId();
         payer.expenseId = expense.id;
         payer.memberId = p.memberId;
         payer.amount = p.amount;
-      });
-    }
+      })
+    );
 
-    for (const s of input.shares) {
-      await database.get<Share>('shares').create((share) => {
+    const shareRecords = normalizedShares.map((s) =>
+      database.get<Share>('shares').prepareCreate((share) => {
         share._raw.id = generateId();
         share.expenseId = expense.id;
         share.memberId = s.memberId;
         share.weight = s.weight;
         share.amount = s.amount;
-      });
-    }
+      })
+    );
+
+    await database.batch(expense, ...payerRecords, ...shareRecords);
 
     return expense;
   });
@@ -75,9 +96,28 @@ export async function updateExpense(
   expenseId: string,
   input: CreateExpenseInput,
 ): Promise<void> {
-  const payersSum = input.payers.reduce((s, p) => s + p.amount, 0);
-  const sharesSum = input.shares.reduce((s, sh) => s + sh.amount, 0);
-  const validation = validateExpense(input.totalAmount, payersSum, sharesSum);
+  const totalAmount = Math.round(Number(input.totalAmount) || 0);
+  const subtotal = Math.round(Number(input.subtotal) || 0);
+  const tipAmount = Math.round(Number(input.tipAmount) || 0);
+
+  const normalizedPayers = input.payers
+    .map((p) => ({
+      memberId: p.memberId,
+      amount: Math.round(Number(p.amount) || 0),
+    }))
+    .filter((p) => p.amount > 0);
+
+  const normalizedShares = input.shares
+    .map((s) => ({
+      memberId: s.memberId,
+      weight: Number(s.weight) || 1,
+      amount: Math.round(Number(s.amount) || 0),
+    }))
+    .filter((s) => s.amount > 0);
+
+  const payersSum = normalizedPayers.reduce((s, p) => s + p.amount, 0);
+  const sharesSum = normalizedShares.reduce((s, sh) => s + sh.amount, 0);
+  const validation = validateExpense(totalAmount, payersSum, sharesSum);
   if (!validation.valid) {
     throw new Error(validation.error);
   }
@@ -87,44 +127,44 @@ export async function updateExpense(
   const existingShares = await expense.shares.fetch();
 
   await database.write(async () => {
-    // Delete old payers and shares
-    for (const p of existingPayers) {
-      await p.destroyPermanently();
-    }
-    for (const s of existingShares) {
-      await s.destroyPermanently();
-    }
+    const deletedPayers = existingPayers.map((p) => p.prepareDestroyPermanently());
+    const deletedShares = existingShares.map((s) => s.prepareDestroyPermanently());
 
-    // Update expense
-    await expense.update((e) => {
+    const updatedExpense = expense.prepareUpdate((e) => {
       e.title = input.title;
-      e.subtotal = input.subtotal;
-      e.tipAmount = input.tipAmount;
-      e.totalAmount = input.totalAmount;
+      e.subtotal = subtotal;
+      e.tipAmount = tipAmount;
+      e.totalAmount = totalAmount;
       e.category = input.category;
       raw(e).updated_at = Date.now();
     });
 
-    // Re-create payers
-    for (const p of input.payers) {
-      await database.get<Payer>('payers').create((payer) => {
+    const newPayers = normalizedPayers.map((p) =>
+      database.get<Payer>('payers').prepareCreate((payer) => {
         payer._raw.id = generateId();
         payer.expenseId = expense.id;
         payer.memberId = p.memberId;
         payer.amount = p.amount;
-      });
-    }
+      })
+    );
 
-    // Re-create shares
-    for (const s of input.shares) {
-      await database.get<Share>('shares').create((share) => {
+    const newShares = normalizedShares.map((s) =>
+      database.get<Share>('shares').prepareCreate((share) => {
         share._raw.id = generateId();
         share.expenseId = expense.id;
         share.memberId = s.memberId;
         share.weight = s.weight;
         share.amount = s.amount;
-      });
-    }
+      })
+    );
+
+    await database.batch(
+      ...deletedPayers,
+      ...deletedShares,
+      updatedExpense,
+      ...newPayers,
+      ...newShares,
+    );
   });
 }
 
@@ -135,9 +175,11 @@ export async function deleteExpense(expenseId: string): Promise<void> {
   const confirmations = await expense.confirmations.fetch();
 
   await database.write(async () => {
-    for (const p of payers) await p.destroyPermanently();
-    for (const s of shares) await s.destroyPermanently();
-    for (const c of confirmations) await c.destroyPermanently();
-    await expense.destroyPermanently();
+    await database.batch(
+      ...payers.map((p) => p.prepareDestroyPermanently()),
+      ...shares.map((s) => s.prepareDestroyPermanently()),
+      ...confirmations.map((c) => c.prepareDestroyPermanently()),
+      expense.prepareDestroyPermanently(),
+    );
   });
 }

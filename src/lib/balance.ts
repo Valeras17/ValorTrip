@@ -3,6 +3,8 @@
 export interface NetResult {
   memberId: string;
   net: number; // positive = owed to them, negative = they owe
+  totalPaid: number; // total cents paid by this member
+  totalShare: number; // total cents consumed (shared) by this member
 }
 
 export interface Transfer {
@@ -18,28 +20,42 @@ export function calcNetBalances(params: {
   settlements: { fromMemberId: string; toMemberId: string; amount: number }[];
 }): NetResult[] {
   const { memberIds, payers, shares, settlements } = params;
-  const map = new Map<string, number>();
+  const netMap = new Map<string, number>();
+  const paidMap = new Map<string, number>();
+  const shareMap = new Map<string, number>();
 
   for (const id of memberIds) {
-    map.set(id, 0);
+    netMap.set(id, 0);
+    paidMap.set(id, 0);
+    shareMap.set(id, 0);
   }
 
   for (const p of payers) {
-    map.set(p.memberId, (map.get(p.memberId) ?? 0) + p.amount);
+    const amount = Math.round(Number(p.amount) || 0);
+    netMap.set(p.memberId, (netMap.get(p.memberId) ?? 0) + amount);
+    paidMap.set(p.memberId, (paidMap.get(p.memberId) ?? 0) + amount);
   }
 
   for (const s of shares) {
-    map.set(s.memberId, (map.get(s.memberId) ?? 0) - s.amount);
+    const amount = Math.round(Number(s.amount) || 0);
+    netMap.set(s.memberId, (netMap.get(s.memberId) ?? 0) - amount);
+    shareMap.set(s.memberId, (shareMap.get(s.memberId) ?? 0) + amount);
   }
 
   for (const s of settlements) {
+    const amount = Math.round(Number(s.amount) || 0);
     // from sends money → their net improves (they pay off debt)
-    map.set(s.fromMemberId, (map.get(s.fromMemberId) ?? 0) + s.amount);
+    netMap.set(s.fromMemberId, (netMap.get(s.fromMemberId) ?? 0) + amount);
     // to receives money → their net decreases (they get paid)
-    map.set(s.toMemberId, (map.get(s.toMemberId) ?? 0) - s.amount);
+    netMap.set(s.toMemberId, (netMap.get(s.toMemberId) ?? 0) - amount);
   }
 
-  return Array.from(map.entries()).map(([memberId, net]) => ({ memberId, net }));
+  return Array.from(netMap.entries()).map(([memberId, net]) => ({
+    memberId,
+    net,
+    totalPaid: paidMap.get(memberId) ?? 0,
+    totalShare: shareMap.get(memberId) ?? 0,
+  }));
 }
 
 /**

@@ -102,20 +102,74 @@ export function makeSnapshotUrl(snapshot: GroupSnapshot): string {
   return `valortrip://snapshot/${encoded}`;
 }
 
-export function makeInviteUrl(groupId: string): string {
-  return `valortrip://join/${groupId}`;
+export interface InviteMemberInfo {
+  id?: string;
+  name: string;
+  isOwner?: boolean;
+}
+
+export function makeInviteUrl(
+  groupId: string,
+  groupName?: string,
+  currency?: string,
+  members?: InviteMemberInfo[]
+): string {
+  const params: string[] = [];
+  if (groupName) params.push(`name=${encodeURIComponent(groupName)}`);
+  if (currency) params.push(`currency=${encodeURIComponent(currency)}`);
+  if (members && members.length > 0) {
+    params.push(`members=${encodeURIComponent(JSON.stringify(members))}`);
+  }
+  return params.length > 0
+    ? `valortrip://join/${groupId}?${params.join('&')}`
+    : `valortrip://join/${groupId}`;
 }
 
 export function parseValortripUrl(url: string):
-  | { type: 'join'; groupId: string }
+  | {
+      type: 'join';
+      groupId: string;
+      groupName?: string;
+      currency?: string;
+      members?: InviteMemberInfo[];
+    }
   | { type: 'snapshot'; snapshot: GroupSnapshot }
   | null {
-  if (url.startsWith('valortrip://join/')) {
-    const groupId = url.replace('valortrip://join/', '');
-    return { type: 'join', groupId };
+  const cleanUrl = (url ?? '').trim();
+  if (cleanUrl.startsWith('valortrip://join/')) {
+    const rest = cleanUrl.replace('valortrip://join/', '');
+    const [rawGroupId, queryString] = rest.split('?');
+    const groupId = (rawGroupId ?? '').trim();
+    if (!groupId) return null;
+
+    let groupName: string | undefined;
+    let currency: string | undefined;
+    let members: InviteMemberInfo[] | undefined;
+    if (queryString) {
+      for (const part of queryString.split('&')) {
+        const eqIdx = part.indexOf('=');
+        const k = eqIdx >= 0 ? part.slice(0, eqIdx) : part;
+        const v = eqIdx >= 0 ? part.slice(eqIdx + 1) : '';
+        try {
+          if (k === 'name' && v) groupName = decodeURIComponent(v);
+          if (k === 'currency' && v) currency = decodeURIComponent(v);
+          if (k === 'members' && v) {
+            const parsedMembers = JSON.parse(decodeURIComponent(v));
+            if (Array.isArray(parsedMembers)) {
+              members = parsedMembers.filter(
+                (m) => m && typeof m.name === 'string' && m.name.trim().length > 0
+              );
+            }
+          }
+        } catch {
+          // ignore malformed query param
+        }
+      }
+    }
+    return { type: 'join', groupId, groupName, currency, members };
   }
-  if (url.startsWith('valortrip://snapshot/')) {
-    const encoded = url.replace('valortrip://snapshot/', '');
+  if (cleanUrl.startsWith('valortrip://snapshot/')) {
+    const encoded = cleanUrl.replace('valortrip://snapshot/', '').trim();
     try {
       const snapshot = decodeSnapshot(encoded);
       if (snapshot.schemaVersion !== SCHEMA_VERSION) {

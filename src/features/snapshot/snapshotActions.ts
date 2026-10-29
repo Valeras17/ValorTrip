@@ -128,8 +128,6 @@ export async function buildGroupSnapshot(groupId: string): Promise<GroupSnapshot
 
 /** Apply a snapshot received via QR — upserts the group as read-only */
 export async function applySnapshot(snapshot: GroupSnapshot): Promise<void> {
-  const deviceId = await getOrCreateDeviceId();
-
   await database.write(async () => {
     // Upsert group
     let group: Group | null = null;
@@ -159,13 +157,26 @@ export async function applySnapshot(snapshot: GroupSnapshot): Promise<void> {
       });
     }
 
-    // Delete existing data for this group
+    // Remove duplicate local members whose name matches a snapshot member with a different ID,
+    // while keeping any unique local members and upserting all snapshot members by ID.
+    const incomingMemberIds = new Set(snapshot.members.map((m) => m.id));
+    const incomingMemberNames = new Set(
+      snapshot.members.map((m) => m.name.trim().toLowerCase())
+    );
     const existingMembers = await database
       .get<Member>('members')
       .query(Q.where('group_id', snapshot.groupId))
       .fetch();
-    for (const m of existingMembers) await m.destroyPermanently();
+    for (const m of existingMembers) {
+      if (
+        !incomingMemberIds.has(m.id) &&
+        incomingMemberNames.has(m.name.trim().toLowerCase())
+      ) {
+        await m.destroyPermanently();
+      }
+    }
 
+    const incomingExpenseIds = new Set(snapshot.expenses.map((e) => e.id));
     const existingExpenses = await database
       .get<Expense>('expenses')
       .query(Q.where('group_id', snapshot.groupId))
@@ -173,98 +184,209 @@ export async function applySnapshot(snapshot: GroupSnapshot): Promise<void> {
     const existingExpenseIds = existingExpenses.map((e) => e.id);
 
     if (existingExpenseIds.length > 0) {
+      const incomingPayerIds = new Set(snapshot.payers.map((p) => p.id));
       const existingPayers = await database
         .get<Payer>('payers')
         .query(Q.where('expense_id', Q.oneOf(existingExpenseIds)))
         .fetch();
+      for (const p of existingPayers) {
+        if (!incomingPayerIds.has(p.id)) await p.destroyPermanently();
+      }
+
+      const incomingShareIds = new Set(snapshot.shares.map((s) => s.id));
       const existingShares = await database
         .get<Share>('shares')
         .query(Q.where('expense_id', Q.oneOf(existingExpenseIds)))
         .fetch();
+      for (const s of existingShares) {
+        if (!incomingShareIds.has(s.id)) await s.destroyPermanently();
+      }
+
+      // Only remove confirmations for expenses that were deleted; keep local confirmations intact
       const existingConfirmations = await database
         .get<Confirmation>('confirmations')
         .query(Q.where('expense_id', Q.oneOf(existingExpenseIds)))
         .fetch();
-      for (const p of existingPayers) await p.destroyPermanently();
-      for (const s of existingShares) await s.destroyPermanently();
-      for (const c of existingConfirmations) await c.destroyPermanently();
+      for (const c of existingConfirmations) {
+        if (!incomingExpenseIds.has(c.expenseId)) await c.destroyPermanently();
+      }
     }
 
-    for (const e of existingExpenses) await e.destroyPermanently();
+    for (const e of existingExpenses) {
+      if (!incomingExpenseIds.has(e.id)) await e.destroyPermanently();
+    }
 
+    const incomingSettlementIds = new Set(snapshot.settlements.map((s) => s.id));
     const existingSettlements = await database
       .get<Settlement>('settlements')
       .query(Q.where('group_id', snapshot.groupId))
       .fetch();
-    for (const s of existingSettlements) await s.destroyPermanently();
+    for (const s of existingSettlements) {
+      if (!incomingSettlementIds.has(s.id)) await s.destroyPermanently();
+    }
 
-    // Insert all snapshot data
+    // Upsert all snapshot data safely
     for (const m of snapshot.members) {
-      await database.get<Member>('members').create((mem) => {
-        mem._raw.id = m.id;
-        mem.groupId = snapshot.groupId;
-        mem.name = m.name;
-        mem.isOwner = m.isOwner;
-        raw(mem).joined_at = m.joinedAt;
-        raw(mem).left_at = m.leftAt ?? 0;
-        raw(mem).returned_at = m.returnedAt ?? 0;
-        raw(mem).created_at = m.joinedAt;
-      });
+      let existing: Member | null = null;
+      try {
+        existing = await database.get<Member>('members').find(m.id);
+      } catch {
+        existing = null;
+      }
+      if (existing) {
+        await existing.update((mem) => {
+          mem.groupId = snapshot.groupId;
+          mem.name = m.name;
+          mem.isOwner = m.isOwner;
+          raw(mem).joined_at = m.joinedAt;
+          raw(mem).left_at = m.leftAt ?? 0;
+          raw(mem).returned_at = m.returnedAt ?? 0;
+        });
+      } else {
+        await database.get<Member>('members').create((mem) => {
+          mem._raw.id = m.id;
+          mem.groupId = snapshot.groupId;
+          mem.name = m.name;
+          mem.isOwner = m.isOwner;
+          raw(mem).joined_at = m.joinedAt;
+          raw(mem).left_at = m.leftAt ?? 0;
+          raw(mem).returned_at = m.returnedAt ?? 0;
+          raw(mem).created_at = m.joinedAt;
+        });
+      }
     }
 
     for (const e of snapshot.expenses) {
-      await database.get<Expense>('expenses').create((exp) => {
-        exp._raw.id = e.id;
-        exp.groupId = e.groupId;
-        exp.title = e.title;
-        exp.subtotal = e.subtotal;
-        exp.tipAmount = e.tipAmount;
-        exp.totalAmount = e.totalAmount;
-        exp.category = e.category;
-        raw(exp).created_at = e.createdAt;
-        raw(exp).updated_at = e.updatedAt;
-      });
+      let existing: Expense | null = null;
+      try {
+        existing = await database.get<Expense>('expenses').find(e.id);
+      } catch {
+        existing = null;
+      }
+      if (existing) {
+        await existing.update((exp) => {
+          exp.groupId = e.groupId;
+          exp.title = e.title;
+          exp.subtotal = e.subtotal;
+          exp.tipAmount = e.tipAmount;
+          exp.totalAmount = e.totalAmount;
+          exp.category = e.category;
+          raw(exp).updated_at = e.updatedAt;
+        });
+      } else {
+        await database.get<Expense>('expenses').create((exp) => {
+          exp._raw.id = e.id;
+          exp.groupId = e.groupId;
+          exp.title = e.title;
+          exp.subtotal = e.subtotal;
+          exp.tipAmount = e.tipAmount;
+          exp.totalAmount = e.totalAmount;
+          exp.category = e.category;
+          raw(exp).created_at = e.createdAt;
+          raw(exp).updated_at = e.updatedAt;
+        });
+      }
     }
 
     for (const p of snapshot.payers) {
-      await database.get<Payer>('payers').create((payer) => {
-        payer._raw.id = p.id;
-        payer.expenseId = p.expenseId;
-        payer.memberId = p.memberId;
-        payer.amount = p.amount;
-      });
+      let existing: Payer | null = null;
+      try {
+        existing = await database.get<Payer>('payers').find(p.id);
+      } catch {
+        existing = null;
+      }
+      if (existing) {
+        await existing.update((payer) => {
+          payer.expenseId = p.expenseId;
+          payer.memberId = p.memberId;
+          payer.amount = p.amount;
+        });
+      } else {
+        await database.get<Payer>('payers').create((payer) => {
+          payer._raw.id = p.id;
+          payer.expenseId = p.expenseId;
+          payer.memberId = p.memberId;
+          payer.amount = p.amount;
+        });
+      }
     }
 
     for (const s of snapshot.shares) {
-      await database.get<Share>('shares').create((share) => {
-        share._raw.id = s.id;
-        share.expenseId = s.expenseId;
-        share.memberId = s.memberId;
-        share.weight = s.weight;
-        share.amount = s.amount;
-      });
+      let existing: Share | null = null;
+      try {
+        existing = await database.get<Share>('shares').find(s.id);
+      } catch {
+        existing = null;
+      }
+      if (existing) {
+        await existing.update((share) => {
+          share.expenseId = s.expenseId;
+          share.memberId = s.memberId;
+          share.weight = s.weight;
+          share.amount = s.amount;
+        });
+      } else {
+        await database.get<Share>('shares').create((share) => {
+          share._raw.id = s.id;
+          share.expenseId = s.expenseId;
+          share.memberId = s.memberId;
+          share.weight = s.weight;
+          share.amount = s.amount;
+        });
+      }
     }
 
     for (const c of snapshot.confirmations) {
-      await database.get<Confirmation>('confirmations').create((conf) => {
-        conf._raw.id = c.id;
-        conf.expenseId = c.expenseId;
-        conf.memberId = c.memberId;
-        conf.isConfirmed = c.isConfirmed;
-        raw(conf).confirmed_at = c.confirmedAt ?? 0;
-      });
+      let existing: Confirmation | null = null;
+      try {
+        existing = await database.get<Confirmation>('confirmations').find(c.id);
+      } catch {
+        existing = null;
+      }
+      if (existing) {
+        await existing.update((conf) => {
+          conf.expenseId = c.expenseId;
+          conf.memberId = c.memberId;
+          conf.isConfirmed = c.isConfirmed;
+          raw(conf).confirmed_at = c.confirmedAt ?? 0;
+        });
+      } else {
+        await database.get<Confirmation>('confirmations').create((conf) => {
+          conf._raw.id = c.id;
+          conf.expenseId = c.expenseId;
+          conf.memberId = c.memberId;
+          conf.isConfirmed = c.isConfirmed;
+          raw(conf).confirmed_at = c.confirmedAt ?? 0;
+        });
+      }
     }
 
     for (const s of snapshot.settlements) {
-      await database.get<Settlement>('settlements').create((set) => {
-        set._raw.id = s.id;
-        set.groupId = s.groupId;
-        set.fromMemberId = s.fromMemberId;
-        set.toMemberId = s.toMemberId;
-        set.amount = s.amount;
-        raw(set).created_at = s.createdAt;
-        set.note = s.note;
-      });
+      let existing: Settlement | null = null;
+      try {
+        existing = await database.get<Settlement>('settlements').find(s.id);
+      } catch {
+        existing = null;
+      }
+      if (existing) {
+        await existing.update((set) => {
+          set.groupId = s.groupId;
+          set.fromMemberId = s.fromMemberId;
+          set.toMemberId = s.toMemberId;
+          set.amount = s.amount;
+          set.note = s.note;
+        });
+      } else {
+        await database.get<Settlement>('settlements').create((set) => {
+          set._raw.id = s.id;
+          set.groupId = s.groupId;
+          set.fromMemberId = s.fromMemberId;
+          set.toMemberId = s.toMemberId;
+          set.amount = s.amount;
+          raw(set).created_at = s.createdAt;
+          set.note = s.note;
+        });
+      }
     }
   });
 }

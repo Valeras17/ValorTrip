@@ -6,31 +6,44 @@ export async function confirmExpense(
   expenseId: string,
   memberId: string,
 ): Promise<void> {
-  // Check if confirmation already exists
-  const existing = await database
-    .get<Confirmation>('confirmations')
-    .query(
-      Q.where('expense_id', expenseId),
-      Q.where('member_id', memberId),
-    )
-    .fetch();
+  await confirmExpenseMultiple(expenseId, [memberId]);
+}
+
+export async function confirmExpenseMultiple(
+  expenseId: string,
+  memberIds: string[],
+): Promise<void> {
+  const uniqueIds = Array.from(new Set(memberIds.filter(Boolean)));
+  if (uniqueIds.length === 0) return;
 
   const now = Date.now();
 
   await database.write(async () => {
-    if (existing.length > 0) {
-      await existing[0]!.update((c) => {
-        c.isConfirmed = true;
-        raw(c).confirmed_at = now;
-      });
-    } else {
-      await database.get<Confirmation>('confirmations').create((c) => {
-        c._raw.id = generateId();
-        c.expenseId = expenseId;
-        c.memberId = memberId;
-        c.isConfirmed = true;
-        raw(c).confirmed_at = now;
-      });
+    for (const memberId of uniqueIds) {
+      const existing = await database
+        .get<Confirmation>('confirmations')
+        .query(
+          Q.where('expense_id', expenseId),
+          Q.where('member_id', memberId),
+        )
+        .fetch();
+
+      if (existing.length > 0) {
+        for (const rec of existing) {
+          await rec.update((c) => {
+            c.isConfirmed = true;
+            raw(c).confirmed_at = now;
+          });
+        }
+      } else {
+        await database.get<Confirmation>('confirmations').create((c) => {
+          c._raw.id = generateId();
+          c.expenseId = expenseId;
+          c.memberId = memberId;
+          c.isConfirmed = true;
+          raw(c).confirmed_at = now;
+        });
+      }
     }
   });
 }

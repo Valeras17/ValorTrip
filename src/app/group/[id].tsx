@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,10 +6,10 @@ import {
   TouchableOpacity,
   Alert,
 } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { Q } from '@nozbe/watermelondb';
 import { withObservables } from '@nozbe/watermelondb/react';
-import { database, Group, Member, Expense } from '@/db';
+import { database, Group, Member, Expense, Settlement } from '@/db';
 import { Button } from '@/components/ui/Button';
 import { Card, Divider } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -24,25 +24,83 @@ interface ExpenseCardProps {
   members: Member[];
   currency: string;
   isOwner: boolean;
+  isClosed: boolean;
+  revision: number;
   onConfirm?: (expenseId: string) => void;
+  onEdit?: (expenseId: string) => void;
 }
 
-function ExpenseCard({ expense, members, currency, isOwner, onConfirm }: ExpenseCardProps) {
+function ExpenseCard({
+  expense,
+  members,
+  currency,
+  isOwner,
+  isClosed,
+  revision,
+  onConfirm,
+  onEdit,
+}: ExpenseCardProps) {
   const [payers, setPayers] = useState<{ name: string; amount: number }[]>([]);
-  const [confirmCount, setConfirmCount] = useState(0);
+  const [shares, setShares] = useState<{ name: string; amount: number }[]>([]);
+  const [confirmedMemberIds, setConfirmedMemberIds] = useState<string[]>([]);
 
   useEffect(() => {
-    expense.payers.fetch().then((ps) => {
-      const list = ps.map((p) => ({
-        name: members.find((m) => m.id === p.memberId)?.name ?? '?',
-        amount: p.amount,
-      }));
-      setPayers(list);
-    });
-    expense.confirmations.fetch().then((cs) => {
-      setConfirmCount(cs.filter((c) => c.isConfirmed).length);
-    });
-  }, [expense, members]);
+    let active = true;
+    const loadCardDetails = () => {
+      expense.payers.fetch().then((ps) => {
+        if (!active) return;
+        const list = ps
+          .filter((p) => p.amount > 0)
+          .map((p) => ({
+            name: members.find((m) => m.id === p.memberId)?.name ?? '?',
+            amount: p.amount,
+          }));
+        setPayers(list);
+      });
+      expense.shares.fetch().then((ss) => {
+        if (!active) return;
+        const list = ss
+          .filter((s) => s.amount > 0)
+          .map((s) => ({
+            name: members.find((m) => m.id === s.memberId)?.name ?? '?',
+            amount: s.amount,
+          }));
+        setShares(list);
+      });
+      expense.confirmations.fetch().then((cs) => {
+        if (!active) return;
+        setConfirmedMemberIds(
+          cs.filter((c) => c.isConfirmed).map((c) => c.memberId)
+        );
+      });
+    };
+
+    loadCardDetails();
+
+    const sub = database
+      .withChangesForTables(['confirmations', 'payers', 'shares'])
+      .subscribe(() => {
+        loadCardDetails();
+      });
+
+    return () => {
+      active = false;
+      sub.unsubscribe();
+    };
+  }, [expense, members, revision]);
+
+  const confirmedSet = new Set(confirmedMemberIds);
+  const relevantMembers = members.filter(
+    (m) => m.isActive || confirmedSet.has(m.id)
+  );
+  const confirmedNames = relevantMembers
+    .filter((m) => confirmedSet.has(m.id))
+    .map((m) => `✅ ${m.name}`);
+  const pendingNames = relevantMembers
+    .filter((m) => !confirmedSet.has(m.id))
+    .map((m) => `⏳ ${m.name}`);
+  const confirmationStatusText =
+    [...confirmedNames, ...pendingNames].join(', ') || 'No participants';
 
   return (
     <Card className="mx-4 mb-3">
@@ -84,18 +142,49 @@ function ExpenseCard({ expense, members, currency, isOwner, onConfirm }: Expense
         ))}
       </View>
 
+      {/* Shares breakdown */}
+      {shares.length > 0 && (
+        <View className="mt-2 pt-2 border-t border-white/5">
+          <Text className="text-slate-400 text-xs mb-1">📊 Shares:</Text>
+          <View className="flex-row flex-wrap gap-1.5">
+            {shares.map((s, i) => (
+              <View
+                key={i}
+                className="bg-surface-900 border border-white/10 rounded-lg px-2 py-0.5"
+              >
+                <Text className="text-slate-300 text-xs">
+                  {s.name}: <Text className="text-white font-semibold">{formatMoney(s.amount, currency)}</Text>
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
+
       {/* Confirmations + actions */}
       <View className="flex-row items-center justify-between mt-3 pt-2 border-t border-white/5">
-        <Text className="text-slate-500 text-xs">
-          ✅ {confirmCount} confirmed
-        </Text>
-        {isOwner && (
-          <TouchableOpacity
-            onPress={() => onConfirm?.(expense.id)}
-            className="bg-brand-500/20 rounded-lg px-3 py-1"
-          >
-            <Text className="text-brand-300 text-xs font-medium">Show to verify</Text>
-          </TouchableOpacity>
+        <View className="flex-1 mr-2">
+          <Text className="text-slate-300 text-xs leading-5">
+            {confirmationStatusText}
+          </Text>
+        </View>
+        {!isClosed && (
+          <View className="flex-row gap-2">
+            {isOwner && (
+              <TouchableOpacity
+                onPress={() => onEdit?.(expense.id)}
+                className="bg-surface-900 border border-white/10 rounded-lg px-2.5 py-1"
+              >
+                <Text className="text-slate-300 text-xs font-medium">✏️ Edit</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              onPress={() => onConfirm?.(expense.id)}
+              className="bg-brand-500/20 rounded-lg px-3 py-1"
+            >
+              <Text className="text-brand-300 text-xs font-medium">Show to verify</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </View>
     </Card>
@@ -149,6 +238,9 @@ function BalanceBar({
                 >
                   {isPos ? '+' : ''}{formatMoney(n.net, currency)}
                 </Text>
+                <Text className="text-slate-400 text-[10px] mt-0.5">
+                  Paid: {formatMoney(n.totalPaid ?? 0, currency)} · Share: {formatMoney(n.totalShare ?? 0, currency)}
+                </Text>
               </View>
             );
           })}
@@ -161,24 +253,83 @@ function BalanceBar({
 // ── Group detail screen ──────────────────────────────────────────────────────
 
 interface GroupDetailProps {
-  group: Group;
+  groups: Group[];
   members: Member[];
   expenses: Expense[];
+  settlements?: Settlement[];
 }
 
-function GroupDetailInner({ group, members, expenses }: GroupDetailProps) {
+function GroupDetailInner({ groups, members, expenses, settlements }: GroupDetailProps) {
+  const group = groups?.[0];
+  const groupId = group?.id ?? '';
   const [nets, setNets] = useState<NetResult[]>([]);
+  const [revision, setRevision] = useState(0);
+
+  const refreshBalances = useCallback(() => {
+    if (!groupId) return;
+    computeGroupBalance(groupId)
+      .then(({ nets: calculatedNets }) => {
+        setNets(calculatedNets);
+        setRevision((r) => r + 1);
+      })
+      .catch(console.error);
+  }, [groupId]);
 
   useEffect(() => {
-    computeGroupBalance(group.id)
-      .then(({ nets }) => setNets(nets))
-      .catch(console.error);
-  }, [group.id, expenses]);
+    refreshBalances();
+  }, [refreshBalances, members, expenses, settlements]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshBalances();
+    }, [refreshBalances])
+  );
+
+  useEffect(() => {
+    if (!groupId) return;
+    const sub = database
+      .withChangesForTables([
+        'expenses',
+        'payers',
+        'shares',
+        'confirmations',
+        'settlements',
+        'members',
+      ])
+      .subscribe(() => {
+        refreshBalances();
+      });
+    return () => sub.unsubscribe();
+  }, [groupId, refreshBalances]);
+
+  if (!group) {
+    return (
+      <View className="flex-1 bg-surface-950 items-center justify-center p-6">
+        <EmptyState
+          emoji="🗺️"
+          title="Trip not found"
+          subtitle="This trip has not been saved to the local database yet."
+        />
+        <Button
+          label="← Back to Home"
+          variant="secondary"
+          onPress={() => router.replace('/')}
+        />
+      </View>
+    );
+  }
 
   const handleConfirm = (expenseId: string) => {
     router.push({
       pathname: '/add-expense',
       params: { groupId: group.id, confirmExpenseId: expenseId },
+    });
+  };
+
+  const handleEdit = (expenseId: string) => {
+    router.push({
+      pathname: '/edit-expense',
+      params: { groupId: group.id, expenseId },
     });
   };
 
@@ -264,7 +415,10 @@ function GroupDetailInner({ group, members, expenses }: GroupDetailProps) {
                 members={members}
                 currency={group.currency}
                 isOwner={group.isOwner && !group.isClosed}
+                isClosed={group.isClosed}
+                revision={revision}
                 onConfirm={handleConfirm}
+                onEdit={handleEdit}
               />
             ))}
             <View className="h-8" />
@@ -272,8 +426,8 @@ function GroupDetailInner({ group, members, expenses }: GroupDetailProps) {
         )}
       </ScrollView>
 
-      {/* Owner actions bottom bar */}
-      {group.isOwner && !group.isClosed && (
+      {/* Actions bottom bar */}
+      {!group.isClosed && (
         <View className="px-4 pb-4 pt-2 flex-row gap-2 border-t border-white/5">
           <Button
             label="📤 Snapshot"
@@ -284,38 +438,47 @@ function GroupDetailInner({ group, members, expenses }: GroupDetailProps) {
             }
             style={{ flex: 1 }}
           />
-          <Button
-            label="🔒 Close Trip"
-            variant="ghost"
-            size="sm"
-            onPress={() =>
-              router.push({ pathname: '/close-trip', params: { groupId: group.id } })
-            }
-            style={{ flex: 1 }}
-          />
+          {group.isOwner && (
+            <Button
+              label="🔒 Close Trip"
+              variant="ghost"
+              size="sm"
+              onPress={() =>
+                router.push({ pathname: '/close-trip', params: { groupId: group.id } })
+              }
+              style={{ flex: 1 }}
+            />
+          )}
         </View>
       )}
     </View>
   );
 }
 
-// WatermelonDB reactive wrapper
+// WatermelonDB reactive wrapper (uses query instead of findAndObserve to prevent "Record groups#... not found" crash)
+const WrappedGroupDetail = withObservables(['id'], ({ id }: { id: string }) => ({
+  groups: database
+    .get<Group>('groups')
+    .query(Q.where('id', id))
+    .observe(),
+  members: database
+    .get<Member>('members')
+    .query(Q.where('group_id', id))
+    .observe(),
+  expenses: database
+    .get<Expense>('expenses')
+    .query(Q.where('group_id', id), Q.sortBy('created_at', Q.desc))
+    .observe(),
+  settlements: database
+    .get<Settlement>('settlements')
+    .query(Q.where('group_id', id))
+    .observe(),
+}))(GroupDetailInner as any);
+
 function GroupDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-
-  const Wrapped = withObservables(['id'], ({ id }: { id: string }) => ({
-    group: database.get<Group>('groups').findAndObserve(id),
-    members: database
-      .get<Member>('members')
-      .query(Q.where('group_id', id))
-      .observe(),
-    expenses: database
-      .get<Expense>('expenses')
-      .query(Q.where('group_id', id), Q.sortBy('created_at', Q.desc))
-      .observe(),
-  }))(GroupDetailInner as any);
-
-  return <Wrapped id={id} />;
+  if (!id) return null;
+  return <WrappedGroupDetail id={id} />;
 }
 
 export default GroupDetailScreen;

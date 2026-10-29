@@ -1,6 +1,6 @@
 import { splitEqually, validateExpense, calcTip, formatMoney } from './src/lib/money';
 import { calcNetBalances, calcMinCashFlow, allSettled } from './src/lib/balance';
-import { encodeSnapshot, decodeSnapshot, buildSnapshot, GroupSnapshot } from './src/lib/snapshot';
+import { encodeSnapshot, decodeSnapshot, buildSnapshot, makeInviteUrl, parseValortripUrl, GroupSnapshot } from './src/lib/snapshot';
 
 function assert(condition: boolean, msg: string) {
   if (!condition) {
@@ -95,6 +95,51 @@ const sumTransfers = complexTransfers.reduce((s, t) => s + t.amount, 0);
 const sumCreditors = complexNets.filter((n) => n.net > 0).reduce((s, n) => s + n.net, 0);
 assert(sumTransfers === sumCreditors, `Conservation of money: sum of transfers (${sumTransfers}) === sum of credits (${sumCreditors})`);
 
+// Custom shares ("By amount"): Valera paid $200 (20000), share $45 (4500) -> net +$155 (+15500)
+const customNets = calcNetBalances({
+  memberIds: ['ivan', 'valera'],
+  payers: [
+    { memberId: 'valera', amount: 20000 },
+    { memberId: 'ivan', amount: 4500 },
+  ],
+  shares: [
+    { memberId: 'ivan', amount: 20000 },
+    { memberId: 'valera', amount: 4500 },
+  ],
+  settlements: [],
+});
+const valeraNet = customNets.find((n) => n.memberId === 'valera');
+const ivanNet = customNets.find((n) => n.memberId === 'ivan');
+assert(valeraNet?.net === 15500, `Valera paid 200, share 45 -> net is +15500 (got ${valeraNet?.net})`);
+assert(valeraNet?.totalPaid === 20000 && valeraNet?.totalShare === 4500, 'Valera totalPaid=20000, totalShare=4500');
+assert(ivanNet?.net === -15500, `Ivan paid 45, share 200 -> net is -15500 (got ${ivanNet?.net})`);
+assert(ivanNet?.totalPaid === 4500 && ivanNet?.totalShare === 20000, 'Ivan totalPaid=4500, totalShare=20000');
+
+// 3 members: Ivan paid $726 (72600), Ivan share $666 (66600), Valera share $60 (6000), Petrov share $0
+const threeMemberNets = calcNetBalances({
+  memberIds: ['ivan', 'valera', 'petrov'],
+  payers: [{ memberId: 'ivan', amount: 72600 }],
+  shares: [
+    { memberId: 'ivan', amount: 66600 },
+    { memberId: 'valera', amount: 6000 },
+  ],
+  settlements: [],
+});
+const ivan726 = threeMemberNets.find((n) => n.memberId === 'ivan');
+const valera726 = threeMemberNets.find((n) => n.memberId === 'valera');
+const petrov726 = threeMemberNets.find((n) => n.memberId === 'petrov');
+assert(ivan726?.net === 6000, `Ivan paid 726, share 666 -> net is +6000 (+$60.00) (got ${ivan726?.net})`);
+assert(valera726?.net === -6000, `Valera paid 0, share 60 -> net is -6000 (-$60.00) (got ${valera726?.net})`);
+assert(petrov726?.net === 0, `Petrov paid 0, share 0 -> net is 0 ($0.00) (got ${petrov726?.net})`);
+const threeMemberTransfers = calcMinCashFlow(threeMemberNets);
+assert(
+  threeMemberTransfers.length === 1 &&
+    threeMemberTransfers[0]?.from === 'valera' &&
+    threeMemberTransfers[0]?.to === 'ivan' &&
+    threeMemberTransfers[0]?.amount === 6000,
+  'Valera pays $60.00 to Ivan, Petrov has no transfers'
+);
+
 console.log('\n--- Testing Snapshot Compression & Round-trip ---');
 
 const dummySnapshot: GroupSnapshot = buildSnapshot({
@@ -140,5 +185,26 @@ assert(decoded.groupName === dummySnapshot.groupName, 'Decoded groupName matches
 assert(decoded.members.length === dummySnapshot.members.length, 'Decoded members count matches');
 assert(decoded.expenses[0]?.title === 'Gasoline', 'Decoded expense title matches');
 assert(decoded.confirmations[0]?.isConfirmed === true, 'Decoded confirmation status matches');
+
+const inviteUrlWithMeta = makeInviteUrl('grp_abc_123', 'Alps Ski Trip', 'EUR', [
+  { name: 'Ivan', isOwner: true },
+  { name: 'Valera', isOwner: false },
+]);
+const parsedInvite = parseValortripUrl(inviteUrlWithMeta);
+assert(
+  parsedInvite?.type === 'join' &&
+    parsedInvite.groupId === 'grp_abc_123' &&
+    parsedInvite.groupName === 'Alps Ski Trip' &&
+    parsedInvite.currency === 'EUR' &&
+    parsedInvite.members?.length === 2 &&
+    parsedInvite.members[0]?.name === 'Ivan',
+  'parseValortripUrl parses invite URL with groupName, currency, and members'
+);
+
+const parsedLegacyInvite = parseValortripUrl('valortrip://join/grp_legacy_999');
+assert(
+  parsedLegacyInvite?.type === 'join' && parsedLegacyInvite.groupId === 'grp_legacy_999',
+  'parseValortripUrl parses legacy invite URL without query params'
+);
 
 console.log('\n🎉 ALL ALGORITHM & SNAPSHOT TESTS PASSED PERFECTLY!\n');

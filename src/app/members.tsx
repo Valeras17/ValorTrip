@@ -29,22 +29,26 @@ export default function MembersScreen() {
   }, [groupId, refreshKey]);
 
   const loadData = async () => {
-    const grp = await database.get<any>('groups').find(groupId);
-    setCurrency(grp.currency ?? 'USD');
-    setIsOwner(grp.isOwner ?? false);
+    try {
+      const grp = await database.get<any>('groups').find(groupId);
+      setCurrency(grp.currency ?? 'USD');
+      setIsOwner(grp.isOwner ?? false);
 
-    const mems = await database
-      .get<Member>('members')
-      .query(Q.where('group_id', groupId))
-      .fetch();
-    setMembers(mems);
+      const mems = await database
+        .get<Member>('members')
+        .query(Q.where('group_id', groupId))
+        .fetch();
+      setMembers(mems);
 
-    const { nets: netResults } = await computeGroupBalance(groupId);
-    const netMap: Record<string, number> = {};
-    for (const n of netResults) {
-      netMap[n.memberId] = n.net;
+      const { nets: netResults } = await computeGroupBalance(groupId);
+      const netMap: Record<string, number> = {};
+      for (const n of netResults) {
+        netMap[n.memberId] = n.net;
+      }
+      setNets(netMap);
+    } catch (err) {
+      Alert.alert('Error', String(err));
     }
-    setNets(netMap);
   };
 
   const handleAdd = async () => {

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, Alert, TouchableOpacity } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { Q } from '@nozbe/watermelondb';
 import { database, Member } from '@/db';
 import { Button } from '@/components/ui/Button';
@@ -22,11 +22,7 @@ export default function SettleScreen() {
   const [loading, setLoading] = useState(true);
   const [recording, setRecording] = useState(false);
 
-  useEffect(() => {
-    loadData();
-  }, [groupId]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const grp = await database.get<any>('groups').find(groupId);
@@ -46,7 +42,17 @@ export default function SettleScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [groupId]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
 
   const memberName = (id: string) => members.find((m) => m.id === id)?.name ?? '?';
 
@@ -101,13 +107,18 @@ export default function SettleScreen() {
             return (
               <Card key={n.memberId} className="mb-2">
                 <View className="flex-row items-center justify-between">
-                  <View className="flex-row items-center">
-                    <View className="w-8 h-8 rounded-full bg-brand-500/20 items-center justify-center mr-2">
+                  <View className="flex-row items-center flex-1 mr-2">
+                    <View className="w-8 h-8 rounded-full bg-brand-500/20 items-center justify-center mr-2.5">
                       <Text className="text-brand-300 font-bold text-sm">
                         {name.charAt(0).toUpperCase()}
                       </Text>
                     </View>
-                    <Text className="text-white font-medium">{name}</Text>
+                    <View className="flex-1">
+                      <Text className="text-white font-medium">{name}</Text>
+                      <Text className="text-slate-400 text-xs mt-0.5">
+                        Paid: {formatMoney(n.totalPaid ?? 0, currency)} · Share: {formatMoney(n.totalShare ?? 0, currency)}
+                      </Text>
+                    </View>
                   </View>
                   <Text
                     className={[

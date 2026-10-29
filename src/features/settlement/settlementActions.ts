@@ -1,5 +1,5 @@
 import { Q } from '@nozbe/watermelondb';
-import { database, Settlement, raw } from '@/db';
+import { database, Member, Expense, Payer, Share, Settlement, raw } from '@/db';
 import { generateId } from '@/lib/id';
 import { calcNetBalances, calcMinCashFlow, NetResult, Transfer } from '@/lib/balance';
 
@@ -19,7 +19,7 @@ export async function recordSettlement(input: RecordSettlementInput): Promise<Se
       s.groupId = input.groupId;
       s.fromMemberId = input.fromMemberId;
       s.toMemberId = input.toMemberId;
-      s.amount = input.amount;
+      s.amount = Math.round(Number(input.amount) || 0);
       raw(s).created_at = now;
       s.note = input.note ?? null;
     });
@@ -32,41 +32,42 @@ export async function recordSettlementsBatch(
 ): Promise<void> {
   const now = Date.now();
   await database.write(async () => {
-    for (const t of transfers) {
-      await database.get<Settlement>('settlements').create((s) => {
+    const records = transfers.map((t) =>
+      database.get<Settlement>('settlements').prepareCreate((s) => {
         s._raw.id = generateId();
         s.groupId = groupId;
         s.fromMemberId = t.from;
         s.toMemberId = t.to;
-        s.amount = t.amount;
+        s.amount = Math.round(Number(t.amount) || 0);
         raw(s).created_at = now;
         s.note = null;
-      });
-    }
+      })
+    );
+    await database.batch(...records);
   });
 }
 
-/** Compute full balance state for a group */
+/** Compute full balance state for a group across ALL expenses without limits */
 export async function computeGroupBalance(groupId: string): Promise<{
   nets: NetResult[];
   transfers: Transfer[];
 }> {
   const members = await database
-    .get('members')
+    .get<Member>('members')
     .query(Q.where('group_id', groupId))
     .fetch();
 
   const expenses = await database
-    .get('expenses')
+    .get<Expense>('expenses')
     .query(Q.where('group_id', groupId))
     .fetch();
 
-  const expenseIds = expenses.map((e: any) => e.id);
+  const expenseIds = expenses.map((e) => e.id);
 
   const payers =
     expenseIds.length > 0
       ? await database
-          .get('payers')
+          .get<Payer>('payers')
           .query(Q.where('expense_id', Q.oneOf(expenseIds)))
           .fetch()
       : [];
@@ -74,26 +75,32 @@ export async function computeGroupBalance(groupId: string): Promise<{
   const shares =
     expenseIds.length > 0
       ? await database
-          .get('shares')
+          .get<Share>('shares')
           .query(Q.where('expense_id', Q.oneOf(expenseIds)))
           .fetch()
       : [];
 
   const settlements = await database
-    .get('settlements')
+    .get<Settlement>('settlements')
     .query(Q.where('group_id', groupId))
     .fetch();
 
-  const memberIds = members.map((m: any) => m.id);
+  const memberIds = members.map((m) => m.id);
 
   const nets = calcNetBalances({
     memberIds,
-    payers: payers.map((p: any) => ({ memberId: p.memberId, amount: p.amount })),
-    shares: shares.map((s: any) => ({ memberId: s.memberId, amount: s.amount })),
-    settlements: settlements.map((s: any) => ({
+    payers: payers.map((p) => ({
+      memberId: p.memberId,
+      amount: Math.round(Number(p.amount) || 0),
+    })),
+    shares: shares.map((s) => ({
+      memberId: s.memberId,
+      amount: Math.round(Number(s.amount) || 0),
+    })),
+    settlements: settlements.map((s) => ({
       fromMemberId: s.fromMemberId,
       toMemberId: s.toMemberId,
-      amount: s.amount,
+      amount: Math.round(Number(s.amount) || 0),
     })),
   });
 

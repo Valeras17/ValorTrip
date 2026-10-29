@@ -59,7 +59,14 @@ export default function CreateGroupScreen() {
   };
 
   if (createdGroupId) {
-    const inviteUrl = makeInviteUrl(createdGroupId);
+    const initialMembers = [
+      { name: ownerName.trim(), isOwner: true },
+      ...extra
+        .map((n) => n.trim())
+        .filter(Boolean)
+        .map((n) => ({ name: n, isOwner: false })),
+    ];
+    const inviteUrl = makeInviteUrl(createdGroupId, name.trim(), currency, initialMembers);
     return (
       <View className="flex-1 bg-surface-950">
         <ScrollView className="flex-1 p-4">
@@ -93,8 +100,7 @@ export default function CreateGroupScreen() {
             variant="primary"
             fullWidth
             onPress={() => {
-              router.dismiss();
-              router.push(`/group/${createdGroupId}`);
+              router.replace(`/group/${createdGroupId}`);
             }}
           />
           <View className="h-4" />
