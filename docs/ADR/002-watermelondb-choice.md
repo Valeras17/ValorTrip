@@ -68,3 +68,4 @@ We adopted **WatermelonDB** with its native SQLite JSI driver as the primary per
 - **Negative & Trade-offs**:
   - WatermelonDB requires decorator support in Babel/TypeScript (`@babel/plugin-proposal-decorators`).
   - `@date` decorator converts timestamp numbers (`0`) into `new Date(0)`, requiring proper boundary checks for nullable timestamps (resolved in ADR / Bugfix for `left_at`).
+

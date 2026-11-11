@@ -104,3 +104,4 @@ This document tracks identified bugs, root-cause analyses, and resolution status
   - When photographing receipts at sharp angles or with strong creases, text lines can be split across multiple bounding boxes, leading to sub-optimal total candidate detection.
 - **Planned Resolution**:
   - Add document border detection and perspective unwarping prior to running OCR.
+

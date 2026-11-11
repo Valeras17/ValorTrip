@@ -43,7 +43,7 @@ This document maintains the task history, completed engineering milestones, and 
 
 ## 🚧 In Progress
 
-- [ ] **Technical Documentation & ADRs**:
+- [x] **Technical Documentation & ADRs**:
   - [x] Write `docs/CHANGELOG.md`
   - [x] Write `docs/ADR/001-no-backend.md`
   - [x] Write `docs/ADR/002-watermelondb-choice.md`
@@ -51,7 +51,7 @@ This document maintains the task history, completed engineering milestones, and 
   - [x] Write `docs/BUGS.md`
   - [x] Write `docs/FEATURES.md`
   - [x] Write `docs/TASKS.md`
-  - [ ] Link documentation in root `README.md` and commit to Git.
+  - [x] Link documentation in root `README.md` and commit to Git.
 
 ---
 
@@ -71,3 +71,7 @@ This document maintains the task history, completed engineering milestones, and 
 - [ ] Implement PDF report generator for business trip expense reimbursement.
 - [ ] Implement CSV export compatible with Microsoft Excel and Google Sheets.
 - [ ] Explore Bluetooth Low Energy (BLE) background sync between nearby companion devices.
+
+### Future / Nice-to-have
+- [ ] **Дизайн и Ассеты (Design & Assets)**: Сгенерировать и добавить крутые иконки, сплэш-скрины (заставки) и графику для Google Play (`icon.png` 1024x1024, `adaptive-icon.png`, `feature-graphic.png` 1024x500). Обновить `app.json`, чтобы приложение выглядело профессионально. Спецификация подготовлена в [`assets/design/README.md`](../assets/design/README.md).
+

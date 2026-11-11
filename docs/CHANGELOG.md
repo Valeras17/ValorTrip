@@ -41,3 +41,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Expense Balance & Math Invariants**: Enforced strict validation preventing user progression if payers or consumers sums mismatch the total.
 
 ---
+

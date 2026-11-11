@@ -55,3 +55,4 @@ We implemented the **Greedy Bipartite Matching Algorithm** in [`src/lib/balance.
   - One-tap "Record All as Settled" automatically writes corresponding `Settlement` records to WatermelonDB, bringing all net balances to exactly \$0.00.
 - **Negative & Trade-offs**:
   - In rare mathematical edge cases, the greedy approach may produce 1 more transfer than the NP-hard theoretical absolute minimum (e.g., 3 transfers instead of 2). In user testing, this difference is completely negligible and far outweighed by predictable sub-millisecond execution.
+

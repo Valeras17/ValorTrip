@@ -50,3 +50,4 @@ We adopted the **Single Bookkeeper (Owner) + Read-Only Optical QR Synchronizatio
   - Zero ongoing server hosting expenses.
 - **Negative & Trade-offs**:
   - Companions cannot directly record expenses from their own devices into the master ledger without re-scanning or passing changes through the bookkeeper. This trade-off was evaluated and deemed acceptable because in 95% of travel groups, one dedicated person acts as the primary organizer.
+

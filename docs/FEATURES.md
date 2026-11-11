@@ -67,3 +67,4 @@ This document outlines the features implemented in **ValorTrip v1.0.0 (MVP)** an
   - Secure application access using FaceID / TouchID / Android Biometrics (`expo-local-authentication`).
 - [ ] **Encrypted Snapshots**:
   - Optional AES-GCM password encryption for exported snapshots and QR payloads.
+
