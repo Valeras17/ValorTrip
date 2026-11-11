@@ -5,6 +5,21 @@
 
 ---
 
+## 📚 Project Documentation
+
+Comprehensive engineering documentation, architecture decisions, and operational ledgers are organized in the [`docs/`](docs/) directory:
+
+- 📜 **[CHANGELOG.md](docs/CHANGELOG.md)** — Version release history and highlights (v1.0.0 MVP).
+- 🏛️ **Architecture Decision Records (ADRs)**:
+  - **[ADR 001: Zero-Backend Architecture](docs/ADR/001-no-backend.md)** — Why we chose Offline-First + Optical QR sync over cloud backends.
+  - **[ADR 002: WatermelonDB Choice](docs/ADR/002-watermelondb-choice.md)** — Why we chose WatermelonDB over AsyncStorage & plain SQLite.
+  - **[ADR 003: Min Cash Flow Algorithm](docs/ADR/003-min-cash-flow.md)** — Why we use the greedy bipartite matching algorithm ($\le N-1$ transfers).
+- 🐞 **[BUGS.md](docs/BUGS.md)** — Known issues, root-cause analyses, and bug statuses (including the Unix Epoch 0 fix).
+- 🚀 **[FEATURES.md](docs/FEATURES.md)** — Implemented feature inventory and future product roadmap (LayoutLMv3, multi-currency, BLE sync).
+- 📋 **[TASKS.md](docs/TASKS.md)** — Completed engineering tasks and active development backlog.
+
+---
+
 ## 💡 Concept & Architecture
 
 When traveling in remote areas (mountains, abroad, planes, off-grid trails), traditional expense splitters like Splitwise fail due to flaky or nonexistent mobile connectivity. Furthermore, requiring every participant to register an account and remember credentials is a major friction point.
