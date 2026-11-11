@@ -37,7 +37,7 @@ export class Member extends Model {
   @readonly @date('created_at') createdAt!: Date;
 
   get isActive(): boolean {
-    return this.leftAt === null;
+    return this.leftAt === null || this.leftAt.getTime() === 0;
   }
 }
 
